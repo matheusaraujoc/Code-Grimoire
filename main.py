@@ -761,10 +761,7 @@ class CodeGrimoireApp(QMainWindow):
         self.status.set_custom("Atualizado", "#22c55e")
         QTimer.singleShot(1500, self.status.set_ready)
 
-    def _on_item_click(self, item, _col):
-        if item.childCount() > 0:
-            item.setExpanded(not item.isExpanded())
-
+    def _on_item_click(self, item, column):
         path = item.data(0, Qt.UserRole)
         if path and os.path.isfile(path):
             self.center.show_file(path)
