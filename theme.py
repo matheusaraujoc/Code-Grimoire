@@ -412,7 +412,7 @@ QRadioButton:hover {{
 QRadioButton::indicator {{
     width: 8px;
     height: 8px;
-    border-radius: 3px;
+    border-radius: 6px;
     border: 2px solid #2e2e4e;
 }}
 QRadioButton::indicator:checked {{
