@@ -4,18 +4,47 @@ widgets.py - Componentes reutilizáveis do CodeGrimoire
 
 import os
 import re
+import base64
+import tempfile
+
 from PySide6.QtWidgets import (
     QWidget, QLabel, QHBoxLayout, QVBoxLayout,
     QPushButton, QTextBrowser, QFrame, QSizePolicy
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QColor, QTextCharFormat, QSyntaxHighlighter
 from theme import SYNTAX_COLORS
 
+# ─────────────────────────────────────────────────────────────────
+#  ÍCONES PNG — gerados via Pillow e embutidos em base64.
+#  O Qt NÃO suporta data URI em image: url() no QSS,
+#  então extraímos os arquivos para temp/ na primeira execução.
+# ─────────────────────────────────────────────────────────────────
+
+_CHECK_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAUUlEQVR4nOWQORIAIAgDif//M7bIZYbGwnTOsEtQ5L+oqtr3msBWQgssBACjBh6mBf7uUpANVtWDIPugG3wI7IBvUsHhhE5CCbJt3fY2bIP32S6VNAMqhrDYAAAAAElFTkSuQmCC"
+_DASH_PNG_B64  = "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAh0lEQVR4nNySwQnAIAxFU/HiwR0cpY7SyTqK3aTdwYMXkSYFi7RNKHjzQ1CS/CfBaOiUhk6NBEgpOTqNMYdkePaptlhKCTHGmTNTDXv2nLOruRtARKWUx1i/IJTDWkCAt9ZuL4AE4cykCZg5aRyM5XqFMbOAFoJXx5lFQIUAyD8jAv5ogFU+AQAA//8kQIAlAAAABklEQVQDAFS1UQcMXDbWAAAAAElFTkSuQmCC"
+
+
+
+def _extract_icon(b64_data: str, filename: str) -> str:
+    icons_dir = os.path.join(tempfile.gettempdir(), "codegrimoire_icons")
+    os.makedirs(icons_dir, exist_ok=True)
+    path = os.path.join(icons_dir, filename)
+    if not os.path.exists(path):
+        with open(path, "wb") as f:
+            f.write(base64.b64decode(b64_data))
+    return path.replace("\\", "/")
+
+
+ICON_CHECK = _extract_icon(_CHECK_PNG_B64, "check.png")
+ICON_DASH  = _extract_icon(_DASH_PNG_B64,  "dash.png")
+
+
+# ─────────────────────────────────────────────────────────────────
+#  WIDGETS
+# ─────────────────────────────────────────────────────────────────
 
 class StatCard(QFrame):
-    """Card de estatística (Arquivos / Linguagens / Tamanho)."""
-
     def __init__(self, value: str, label: str, parent=None):
         super().__init__(parent)
         self.setObjectName("stat_card")
@@ -42,8 +71,6 @@ class StatCard(QFrame):
 
 
 class StatusWidget(QWidget):
-    """Indicador de status no rodapé inferior esquerdo."""
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("statusbar_widget")
@@ -64,28 +91,22 @@ class StatusWidget(QWidget):
 
     def set_ready(self):
         self.text.setText("Pronto")
-        self.dot.setStyleSheet(
-            "background:transparent; font-size:8px; color:#22c55e;")
+        self.dot.setStyleSheet("background:transparent; font-size:8px; color:#22c55e;")
 
     def set_busy(self, msg="Processando..."):
         self.text.setText(msg)
-        self.dot.setStyleSheet(
-            "background:transparent; font-size:8px; color:#facc15;")
+        self.dot.setStyleSheet("background:transparent; font-size:8px; color:#facc15;")
 
     def set_error(self, msg="Erro"):
         self.text.setText(msg)
-        self.dot.setStyleSheet(
-            "background:transparent; font-size:8px; color:#ef4444;")
+        self.dot.setStyleSheet("background:transparent; font-size:8px; color:#ef4444;")
 
     def set_custom(self, msg: str, color: str):
         self.text.setText(msg)
-        self.dot.setStyleSheet(
-            f"background:transparent; font-size:8px; color:{color};")
+        self.dot.setStyleSheet(f"background:transparent; font-size:8px; color:{color};")
 
 
-class LogsPanel(QWidget):
-    """Painel de logs na parte inferior da janela."""
-
+class LogsPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("logs_panel")
@@ -133,8 +154,6 @@ class LogsPanel(QWidget):
 
 
 class MarkdownHighlighter(QSyntaxHighlighter):
-    """Syntax highlighting para o preview do markdown."""
-
     def __init__(self, document):
         super().__init__(document)
         c = SYNTAX_COLORS
