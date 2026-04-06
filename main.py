@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QMessageBox, QInputDialog,
     QTextBrowser, QFrame, QRadioButton, QButtonGroup,
     QCheckBox, QScrollArea, QSizePolicy, QSpinBox,
-    QGridLayout, QMenu, QStackedWidget
+    QGridLayout, QMenu, QStackedWidget, QDialog
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal
 from PySide6.QtGui import QFont, QColor, QIcon
@@ -185,6 +185,101 @@ class GeneratorWorker(QThread):
             code = re.sub(r'^\s*//.*$\n?', '', code, flags=re.MULTILINE)
         return code
 
+class RecentProjectsDialog(QDialog):
+    def __init__(self, history, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Projetos Recentes")
+        self.setFixedSize(550, 400)
+        
+        self.selected_folder = None
+        self.items_removed = []
+        
+        self.setStyleSheet("""
+            QDialog { background-color: #13131f; }
+            QScrollArea { border: none; background: transparent; }
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        lbl = QLabel("Histórico de Projetos")
+        lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #c8cdd8; margin-bottom: 10px;")
+        layout.addWidget(lbl)
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        
+        container = QWidget()
+        container.setStyleSheet("background: transparent;")
+        self.vbox = QVBoxLayout(container)
+        self.vbox.setAlignment(Qt.AlignTop)
+        self.vbox.setSpacing(10)
+        
+        if not history:
+            empty_lbl = QLabel("Nenhum projeto recente.")
+            empty_lbl.setStyleSheet("color: #6060a0; font-style: italic;")
+            self.vbox.addWidget(empty_lbl)
+        else:
+            for path in history:
+                self.add_row(path)
+            
+        scroll.setWidget(container)
+        layout.addWidget(scroll)
+        
+    def add_row(self, path):
+        row = QFrame()
+        row.setObjectName("project_row") 
+        row.setStyleSheet("""
+            QFrame#project_row { background: #17172a; border-radius: 6px; border: 1px solid #1e1e30; }
+            QFrame#project_row:hover { background: #1e1e3a; border-color: #2e2e50; }
+        """)
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(15, 10, 15, 10)
+        
+        lbl_name = QLabel(os.path.basename(path))
+        # Adicionado background: transparent
+        lbl_name.setStyleSheet("font-weight: 600; color: #dde1ed; font-size: 14px; border: none; background: transparent;")
+        
+        lbl_path = QLabel(path)
+        # Adicionado background: transparent
+        lbl_path.setStyleSheet("font-size: 11px; color: #6060a0; border: none; background: transparent;")
+        
+        text_layout = QVBoxLayout()
+        text_layout.setSpacing(2)
+        text_layout.addWidget(lbl_name)
+        text_layout.addWidget(lbl_path)
+        row_layout.addLayout(text_layout, stretch=1)
+        
+        btn_open = QPushButton("Abrir")
+        btn_open.setStyleSheet("""
+            QPushButton { background: #4f46e5; color: white; border-radius: 5px; padding: 6px 14px; font-weight: bold; border: none; outline: none; }
+            QPushButton:hover { background: #4338ca; }
+        """)
+        btn_open.setCursor(Qt.PointingHandCursor)
+        btn_open.clicked.connect(lambda _, p=path: self.open_project(p))
+        
+        btn_remove = QPushButton("x")
+        #btn_remove.setToolTip("Remover do histórico")
+        btn_remove.setStyleSheet("""
+            QPushButton { background: #1e1e30; color: #c8cdd8; border-radius: 5px; padding: 2px 10px; font-size: 20px; font-family: Arial, sans-serif; font-weight: bold; border: 1px solid #252540; outline: none; }
+            QPushButton:hover { background: #ef4444; color: white; border-color: #ef4444; }
+        """)
+        btn_remove.setCursor(Qt.PointingHandCursor)
+        btn_remove.clicked.connect(lambda _, p=path, r=row: self.remove_project(p, r))
+        
+        row_layout.addWidget(btn_open)
+        row_layout.addSpacing(5)
+        row_layout.addWidget(btn_remove)
+        
+        self.vbox.addWidget(row)
+        
+    def open_project(self, path):
+        self.selected_folder = path
+        self.accept()
+        
+    def remove_project(self, path, row_widget):
+        self.items_removed.append(path)
+        row_widget.deleteLater()
 
 # ─────────────────────────────────────────────
 #  TOPBAR
@@ -250,11 +345,17 @@ class LeftPanel(QWidget):
         self.btn_refresh.setToolTip("Atualizar arquivos e estrutura")
         self.btn_refresh.setEnabled(False) # Só ativa quando houver projeto
 
+        # 👇 NOVO: Botão de Projetos Recentes
+        self.btn_recent = QPushButton("◷")
+        self.btn_recent.setObjectName("btn_open_folder")
+        self.btn_recent.setToolTip("Projetos Recentes")
+
         self.btn_open = QPushButton("Abrir")
         self.btn_open.setObjectName("btn_open_folder")
 
         pf_layout.addLayout(info, 1)
         pf_layout.addWidget(self.btn_refresh)
+        pf_layout.addWidget(self.btn_recent)
         pf_layout.addWidget(self.btn_open)
         col.addWidget(self.project_frame)
 
@@ -633,10 +734,12 @@ class CodeGrimoireApp(QMainWindow):
 
         self.current_folder  = ""
         self.presets_file    = os.path.join(os.path.expanduser("~"), ".codegrimoire_presets.json")
+        self.history_file    = os.path.join(os.path.expanduser("~"), ".codegrimoire_history.json")
         self._md_parts       = []
         self._current_part_idx = 0
         self.root_item       = None
         self._worker         = None
+        self._just_toggled   = False
 
         self.setStyleSheet(MAIN_QSS)
         self._build_ui()
@@ -696,7 +799,8 @@ class CodeGrimoireApp(QMainWindow):
         self.left.btn_all.clicked.connect(lambda: self._set_all(True))
         self.left.btn_none.clicked.connect(lambda: self._set_all(False))
         self.left.tree.itemClicked.connect(self._on_item_click)
-        self.left.tree.itemChanged.connect(lambda item, col: self.count_timer.start(200))
+        self.left.btn_recent.clicked.connect(self.show_recent_projects)
+        self.left.tree.itemChanged.connect(self._on_item_changed)
 
         # CenterPanel (Ações do Markdown)
         self.center.btn_show_md.clicked.connect(self._restore_md_view)
@@ -711,12 +815,26 @@ class CodeGrimoireApp(QMainWindow):
         # RightPanel (Liga/Desliga dos Filtros)
         self.right.chk_use_ignore.clicked.connect(self.refresh_project)
         self.right.chk_use_gitignore.clicked.connect(self.refresh_project)
+    
+    def _on_item_changed(self, item, col):
+        # 1. Ativa o sinalizador: Avisa que um checkbox acabou de ser alterado
+        self._just_toggled = True
+        
+        # 2. Chama a atualização da contagem (como fazia antes)
+        self.count_timer.start(200)
 
-    def select_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Selecione a pasta do projeto")
-        if not folder:
-            return
+    def select_folder(self, checked=False, folder_path=None):
+        # Proteção contra o "checked" do PySide6
+        if not isinstance(folder_path, str): 
+            folder = QFileDialog.getExistingDirectory(self, "Selecione a pasta do projeto")
+            if not folder:
+                return
+        else:
+            folder = folder_path
+
         self.current_folder = folder
+        self._add_to_history(folder) # 👇 Salva no histórico automaticamente
+        
         self._md_parts = []
         self._current_part_idx = 0
         self.center.btn_show_md.setVisible(False)
@@ -731,6 +849,58 @@ class CodeGrimoireApp(QMainWindow):
         self._update_preset_combo()
         self.logs.log(f"Projeto aberto: {os.path.basename(folder)}", "info")
         self.status.set_ready()
+
+    # ─────────────────────────────────────────────
+    #  SISTEMA DE HISTÓRICO
+    # ─────────────────────────────────────────────
+    def _load_history(self) -> list:
+        if os.path.exists(self.history_file):
+            try:
+                with open(self.history_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except:
+                pass
+        return []
+
+    def _save_history(self, history: list):
+        with open(self.history_file, 'w', encoding='utf-8') as f:
+            json.dump(history, f, indent=4, ensure_ascii=False)
+
+    def _add_to_history(self, folder: str):
+        folder = os.path.normpath(folder)
+        history = self._load_history()
+        
+        if folder in history:
+            history.remove(folder)
+            
+        history.insert(0, folder) # Adiciona no topo da lista
+        history = history[:15]    # Mantém apenas os 15 mais recentes
+        self._save_history(history)
+
+    def _remove_from_history(self, folder: str):
+        folder = os.path.normpath(folder)
+        history = self._load_history()
+        if folder in history:
+            history.remove(folder)
+            self._save_history(history)
+
+    def show_recent_projects(self):
+        history = self._load_history()
+        dlg = RecentProjectsDialog(history, self)
+        
+        if dlg.exec() == QDialog.Accepted:
+            selected = dlg.selected_folder
+            if selected and os.path.exists(selected):
+                self.select_folder(folder_path=selected)
+            elif selected:
+                QMessageBox.warning(self, "Erro", "A pasta deste projeto não existe mais ou foi movida.")
+                self._remove_from_history(selected)
+                
+        # Atualiza o arquivo caso o usuário tenha clicado no 'X' para remover algum projeto
+        if dlg.items_removed:
+            for item in dlg.items_removed:
+                self._remove_from_history(item)
+            self.logs.log("Histórico de projetos atualizado.", "info")
     
     def refresh_project(self):
         """Recarrega a árvore de arquivos preservando os itens que estavam marcados."""
@@ -761,8 +931,18 @@ class CodeGrimoireApp(QMainWindow):
         self.status.set_custom("Atualizado", "#22c55e")
         QTimer.singleShot(1500, self.status.set_ready)
 
-    def _on_item_click(self, item, column):
+    def _on_item_click(self, item, col):
+        # Se o checkbox acabou de ser clicado, a variável estará True.
+        if self._just_toggled:
+            self._just_toggled = False # Desliga o sinalizador para o próximo clique
+            return # Aborta: NÃO abre o arquivo!
+
+        # -------------------------------------------------------------
+        # Se chegou aqui, o usuário clicou no TEXTO ou no ÍCONE.
+        # -------------------------------------------------------------
+        
         path = item.data(0, Qt.UserRole)
+        
         if path and os.path.isfile(path):
             self.center.show_file(path)
             if self._md_parts:
@@ -902,32 +1082,65 @@ class CodeGrimoireApp(QMainWindow):
 
     def _export(self):
         if not self._md_parts:
-            QMessageBox.information(self, "Aviso", "Gere o Markdown primeiro.")
+            QMessageBox.information(self, "Aviso", "Gere o documento primeiro.")
             return
+        
         nome = os.path.basename(self.current_folder) or "projeto"
 
+        # CENÁRIO 1: Exportar apenas um arquivo
         if len(self._md_parts) == 1:
-            path, _ = QFileDialog.getSaveFileName(
-                self, "Exportar Markdown", f"{nome}_contexto.md", "Markdown (*.md)"
+            filtros = "Markdown (*.md);;Texto (*.txt);;XML (*.xml);;Todos os arquivos (*.*)"
+            path, filtro_selecionado = QFileDialog.getSaveFileName(
+                self, "Exportar Arquivo", f"{nome}_contexto.md", filtros
             )
+            
             if path:
+                # Garante que a extensão correta seja adicionada caso o usuário não digite
+                if not os.path.splitext(path)[1]:
+                    if "Markdown" in filtro_selecionado:
+                        path += ".md"
+                    elif "Texto" in filtro_selecionado:
+                        path += ".txt"
+                    elif "XML" in filtro_selecionado:
+                        path += ".xml"
+
                 try:
                     with open(path, 'w', encoding='utf-8') as f:
                         f.write(self._md_parts[0])
                     self.logs.log(f"Salvo em: {path}", "success")
                 except Exception as e:
                     QMessageBox.critical(self, "Erro", str(e))
+                    
+        # CENÁRIO 2: Exportar múltiplas partes
         else:
             folder = QFileDialog.getExistingDirectory(
                 self, "Selecione a pasta para exportar as partes"
             )
+            
             if folder:
+                # Pergunta ao usuário qual formato usar para os múltiplos arquivos
+                formatos = [".md", ".txt", ".xml"]
+                ext, ok = QInputDialog.getItem(
+                    self, 
+                    "Formato de Exportação", 
+                    "Escolha o formato para salvar as partes:", 
+                    formatos, 
+                    0, 
+                    False
+                )
+                
+                if not ok:
+                    self.logs.log("Exportação de múltiplas partes cancelada.", "warning")
+                    return
+
                 try:
                     for i, part_md in enumerate(self._md_parts):
-                        full_path = os.path.join(folder, f"{nome}_parte_{i+1}.md")
+                        # Gera o nome do arquivo injetando a extensão escolhida
+                        full_path = os.path.join(folder, f"{nome}_parte_{i+1}{ext}")
                         with open(full_path, 'w', encoding='utf-8') as f:
                             f.write(part_md)
-                    self.logs.log(f"Exportadas {len(self._md_parts)} partes em: {folder}", "success")
+                            
+                    self.logs.log(f"Exportadas {len(self._md_parts)} partes em: {folder} (Formato: {ext})", "success")
                     QMessageBox.information(
                         self, "Sucesso", f"{len(self._md_parts)} partes exportadas."
                     )
