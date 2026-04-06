@@ -197,29 +197,6 @@ QTreeWidget#file_tree::item:selected {
     color: #dde1ed;
 }
 
-/* =============================================
-   SETINHAS DA ÁRVORE (BRANCHES) - SVG BASE64
-   ============================================= */
-QTreeWidget#file_tree::branch:has-children:!has-siblings:closed,
-QTreeWidget#file_tree::branch:closed:has-children:has-siblings {
-    border-image: none;
-    /* Ícone de seta para a DIREITA (Pasta Fechada) */
-    image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM3MDcwYTAiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cG9seWxpbmUgcG9pbnRzPSI5IDE4IDE1IDEyIDkgNiI+PC9wb2x5bGluZT48L3N2Zz4=);
-}
-
-QTreeWidget#file_tree::branch:open:has-children:!has-siblings,
-QTreeWidget#file_tree::branch:open:has-children:has-siblings  {
-    border-image: none;
-    /* Ícone de seta para BAIXO (Pasta Aberta) */
-    image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM3MDcwYTAiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cG9seWxpbmUgcG9pbnRzPSI2IDkgMTIgMTUgMTggOSI+PC9wb2x5bGluZT48L3N2Zz4=);
-}
-
-/* O código continua normalmente abaixo com...
-QPushButton#btn_tree {
-    background: transparent;
-    ...
-*/
-
 QPushButton#btn_tree {
     background: transparent;
     border: none;

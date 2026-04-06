@@ -98,7 +98,7 @@ class LeftPanel(QWidget):
         self.tree = QTreeWidget()
         self.tree.setObjectName("file_tree")
         self.tree.setHeaderHidden(True)
-        self.tree.setIndentation(16)
+        self.tree.setIndentation(20)
         self.tree.setAnimated(True)
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         col.addWidget(self.tree, 1)
@@ -438,8 +438,6 @@ class CodeGrimoireApp(QMainWindow):
         self.left.btn_all.clicked.connect(lambda: self._set_all(True))
         self.left.btn_none.clicked.connect(lambda: self._set_all(False))
         self.left.tree.itemClicked.connect(self._on_item_click)
-        self.left.tree.itemExpanded.connect(self._on_folder_expand)
-        self.left.tree.itemCollapsed.connect(self._on_folder_collapse)
         self.left.tree.itemChanged.connect(lambda item, col: self.count_timer.start(50))
 
         # Eventos do preview e visualização multi-partes
@@ -711,7 +709,7 @@ class CodeGrimoireApp(QMainWindow):
         self.left.tree.clear()
         
         nome = os.path.basename(folder) or folder
-        self.root_item = QTreeWidgetItem(self.left.tree, [f"▼ 📁 {nome}"])
+        self.root_item = QTreeWidgetItem(self.left.tree, [f"📁 {nome}"])
         self.root_item.setData(0, Qt.UserRole, os.path.normpath(folder))
         self.root_item.setFlags(self.root_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsAutoTristate)
         self.root_item.setCheckState(0, Qt.Checked)
@@ -736,7 +734,7 @@ class CodeGrimoireApp(QMainWindow):
 
         for d in dirs:
             full = os.path.normpath(os.path.join(path, d))
-            item = QTreeWidgetItem(parent, [f"▶ 📁 {d}"])
+            item = QTreeWidgetItem(parent, [f"📁 {d}"])
             item.setData(0, Qt.UserRole, full)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsAutoTristate)
             item.setCheckState(0, Qt.Checked)
