@@ -1,3 +1,6 @@
 __pycache__
 main.dist
 CodeGrimoire.exe
+.vscode
+main.build
+main.onefile-build

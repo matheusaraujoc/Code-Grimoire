@@ -7,6 +7,7 @@ import sys
 import os
 import json
 import re
+import fnmatch
 
 if sys.platform == 'win32':
     import ctypes
@@ -34,6 +35,9 @@ from widgets import StatCard, StatusWidget, LogsPanel, MarkdownHighlighter
 # ─────────────────────────────────────────────
 #  WORKER THREAD — Geração em background
 # ─────────────────────────────────────────────
+# ─────────────────────────────────────────────
+#  WORKER THREAD — Geração em background
+# ─────────────────────────────────────────────
 class GeneratorWorker(QThread):
     finished = Signal(list, dict)   # (partes_md, stats_dict)
     error    = Signal(str)
@@ -55,31 +59,39 @@ class GeneratorWorker(QThread):
         files         = self.files
         only_tree     = cfg["only_tree"]
         include_tree  = cfg["include_tree"]
-        tree_scope    = cfg["tree_scope"]
         include_toc   = cfg["include_toc"]
-        rm_comments   = cfg["rm_comments"]
         is_split      = cfg["is_split"]
         limit_lines   = cfg["limit_lines"]
         nome_projeto  = cfg["nome_projeto"]
         tree_text     = cfg["tree_text"]
-        header_content = f"# {nome_projeto}\n\n"
+        base          = cfg["base_folder"]
+        
+        # Define se estamos no modo hardcore (otimizado)
+        fmt_mode = cfg.get("format_mode", "simple")
+        is_opt   = (fmt_mode == "optimized")
+        
+        # Força minificação e remoção se estiver no modo Otimizado
+        rm_comments = cfg["rm_comments"] or is_opt
+        minify_code = cfg.get("minify", False) or is_opt
 
-        if include_tree:
-            header_content += "## Estrutura do Projeto\n\n```\n"
-            header_content += f"{nome_projeto}/\n"
-            header_content += tree_text
-            header_content += "```\n\n"
-
-        if include_toc and not only_tree:
-            header_content += "## Sumário de Arquivos\n\n"
-            base = cfg["base_folder"]
-            for fp in files:
-                rel = os.path.relpath(fp, base).replace(os.sep, '/')
-                header_content += f"- {rel}\n"
-            header_content += "\n"
-
-        if not only_tree:
-            header_content += "## Conteúdo dos Arquivos\n\n"
+        # 1. CONSTRUÇÃO DO CABEÇALHO
+        if is_opt:
+            header_content = f"<project={nome_projeto}>\n"
+            if include_tree:
+                header_content += f"<tree>\n{tree_text}</tree>\n"
+        else:
+            header_content = f"# {nome_projeto}\n\n"
+            if include_tree:
+                header_content += "## Estrutura do Projeto\n\n```\n"
+                header_content += f"{nome_projeto}/\n{tree_text}```\n\n"
+            if include_toc and not only_tree:
+                header_content += "## Sumário de Arquivos\n\n"
+                for fp in files:
+                    rel = os.path.relpath(fp, base).replace(os.sep, '/')
+                    header_content += f"- {rel}\n"
+                header_content += "\n"
+            if not only_tree:
+                header_content += "## Conteúdo dos Arquivos\n\n"
 
         md_parts      = []
         current_md    = header_content
@@ -87,8 +99,8 @@ class GeneratorWorker(QThread):
         total_size    = 0
         total_lines   = current_lines
         exts_found    = {}
-        base          = cfg["base_folder"]
 
+        # 2. LOOP DE EXTRAÇÃO DOS ARQUIVOS
         if not only_tree:
             for fp in files:
                 rel  = os.path.relpath(fp, base).replace(os.sep, '/')
@@ -100,20 +112,42 @@ class GeneratorWorker(QThread):
                 try:
                     with open(fp, 'r', encoding='utf-8') as f:
                         code = f.read()
+                        
                     if rm_comments:
                         code = self._strip_comments(code, lang)
-                    snippet = f"### `{rel}`\n\n```{lang}\n{code}\n```\n\n---\n\n"
+                        
+                    if minify_code:
+                        # Limpa espaços e tabs invisíveis no fim das linhas
+                        code = re.sub(r'[ \t]+$', '', code, flags=re.MULTILINE)
+                        # Remove quebras de linha duplas ou triplas, mantendo a indentação segura
+                        code = re.sub(r'\n\s*\n', '\n', code)
+                        code = code.strip()
+
+                    # FORMATO DE SAÍDA DO SNIPPET
+                    if is_opt:
+                        snippet = f"<{rel}>\n{code}\n"
+                    else:
+                        snippet = f"### `{rel}`\n\n```{lang}\n{code}\n```\n\n---\n\n"
+                        
                 except (UnicodeDecodeError, PermissionError):
-                    snippet = f"### `{rel}`\n\n*[Arquivo binário ou sem permissão — ignorado]*\n\n---\n\n"
+                    snippet = f"<{rel}>\n[BINÁRIO/SEM PERMISSÃO]\n" if is_opt else f"### `{rel}`\n\n*[Arquivo binário ou sem permissão — ignorado]*\n\n---\n\n"
                 except Exception as e:
-                    snippet = f"### `{rel}`\n\n*[Erro: {e}]*\n\n---\n\n"
+                    snippet = f"<{rel}>\n[ERRO: {e}]\n" if is_opt else f"### `{rel}`\n\n*[Erro: {e}]*\n\n---\n\n"
 
                 snip_lines = snippet.count('\n')
 
+                # 3. LÓGICA DE DIVISÃO EM PARTES (SPLIT)
                 if is_split and (current_lines + snip_lines) > limit_lines \
                         and current_lines > header_content.count('\n'):
+                    
                     md_parts.append(current_md)
-                    current_md    = f"# {nome_projeto} (Parte {len(md_parts) + 1})\n\n"
+                    
+                    # Cria o cabeçalho da próxima parte
+                    if is_opt:
+                        current_md = f"<project={nome_projeto} part={len(md_parts) + 1}>\n"
+                    else:
+                        current_md = f"# {nome_projeto} (Parte {len(md_parts) + 1})\n\n"
+                        
                     current_lines = current_md.count('\n')
 
                 current_md    += snippet
@@ -124,6 +158,7 @@ class GeneratorWorker(QThread):
         if current_md:
             md_parts.append(current_md)
 
+        # 4. FINALIZAÇÃO E ESTATÍSTICAS
         if only_tree:
             total_size  = len(header_content.encode('utf-8'))
             total_lines = header_content.count('\n')
@@ -136,28 +171,18 @@ class GeneratorWorker(QThread):
         }
         return md_parts, stats
 
-    _PY_COMMENT  = re.compile(r'(?<!["\'])#(?!["\']).*$', re.MULTILINE)
-    _PY_DOCSTR3  = re.compile(r'""".*?"""', re.DOTALL)
-    _PY_DOCSTR1  = re.compile(r"'''.*?'''", re.DOTALL)
-    _SL_COMMENT  = re.compile(r'(?<!"http:)(?<!"https:)//(?!/).*$', re.MULTILINE)
-
     def _strip_comments(self, code: str, lang: str) -> str:
-        if lang in ('py',):
-            placeholders, i = {}, 0
-            for pat in (self._PY_DOCSTR3, self._PY_DOCSTR1):
-                for m in pat.finditer(code):
-                    key = f"__DS{i}__"
-                    placeholders[key] = m.group()
-                    code = code.replace(m.group(), key, 1)
-                    i += 1
-            code = self._PY_COMMENT.sub('', code)
-            for key, val in placeholders.items():
-                code = code.replace(key, val)
-            return code
-
-        if lang in ('js', 'ts', 'tsx', 'jsx', 'java', 'c', 'cpp', 'cs', 'go', 'rust', 'rs'):
-            return self._SL_COMMENT.sub('', code)
-
+        """
+        Versão Ultra-Safe: Remove apenas linhas que são inteiramente comentários.
+        Ignora comentários inline para não correr o risco de quebrar strings de regex
+        ou corromper o arquivo original (Zero placeholders).
+        """
+        if lang in ('py', 'sh', 'bash', 'zsh', 'yaml', 'yml', 'rb'):
+            # Remove linhas onde o primeiro caractere não-espaço é '#'
+            code = re.sub(r'^\s*#.*$\n?', '', code, flags=re.MULTILINE)
+        elif lang in ('js', 'ts', 'tsx', 'jsx', 'java', 'c', 'cpp', 'cs', 'go', 'rust', 'rs', 'php'):
+            # Remove linhas onde o primeiro caractere não-espaço é '//'
+            code = re.sub(r'^\s*//.*$\n?', '', code, flags=re.MULTILINE)
         return code
 
 
@@ -464,13 +489,19 @@ class RightPanel(QWidget):
         self.radio_simple   = QRadioButton("Markdown Simples")
         self.radio_detailed = QRadioButton("Markdown Detalhado")
         self.radio_toc      = QRadioButton("Com Tabela de Conteúdo")
+        
+        self.radio_optimized = QRadioButton("Otimizado p/ LLM (XML Tags)")
+        
         self.radio_simple.setChecked(True)
         self._fmt_group = QButtonGroup()
-        for r in (self.radio_simple, self.radio_detailed, self.radio_toc):
+        
+        # Atualize o loop para incluir a nova variável
+        for r in (self.radio_simple, self.radio_detailed, self.radio_toc, self.radio_optimized):
             self._fmt_group.addButton(r)
+            
         for radio, hint in zip(
-            (self.radio_simple, self.radio_detailed, self.radio_toc),
-            ["Estrutura limpa e direta", "Inclui comentários e informações", "Gera sumário automático"],
+            (self.radio_simple, self.radio_detailed, self.radio_toc, self.radio_optimized),
+            ["Estrutura limpa e direta", "Inclui comentários", "Gera sumário automático", "Máxima economia de tokens (Sem frescuras)"],
         ):
             lay.addWidget(radio)
             lbl = QLabel(hint)
@@ -507,9 +538,20 @@ class RightPanel(QWidget):
 
     def _build_filters_group(self, parent):
         group, lay = self._make_group("Filtros")
-        self.field_ignore = QLineEdit("node_modules, .git, dist")
-        lay.addWidget(QLabel("Ignorar arquivos:"))
+        
+        # 1. Filtro Manual (Campo de Texto)
+        self.chk_use_ignore = QCheckBox("Aplicar filtros manuais")
+        self.chk_use_ignore.setChecked(True)
+        lay.addWidget(self.chk_use_ignore)
+        
+        self.field_ignore = QLineEdit("node_modules, .git, dist, __pycache__")
         lay.addWidget(self.field_ignore)
+        
+        # 2. Filtro Automático (.gitignore)
+        self.chk_use_gitignore = QCheckBox("Aplicar .gitignore do projeto")
+        self.chk_use_gitignore.setChecked(True)
+        lay.addWidget(self.chk_use_gitignore)
+        
         parent.addWidget(group)
 
     def _build_optimizations_group(self, parent):
@@ -599,6 +641,14 @@ class CodeGrimoireApp(QMainWindow):
         self.setStyleSheet(MAIN_QSS)
         self._build_ui()
         self._connect()
+    
+    def _should_ignore(self, name: str) -> bool:
+        """Verifica se o nome do arquivo/pasta bate com as regras de ignorar."""
+        for pattern in self._ignore_patterns:
+            # O fnmatch entende asteriscos (ex: *.pyc, .env, node_modules)
+            if fnmatch.fnmatch(name, pattern) or name == pattern:
+                return True
+        return False
 
     def _build_ui(self):
         central = QWidget()
@@ -636,23 +686,31 @@ class CodeGrimoireApp(QMainWindow):
         self.count_timer.timeout.connect(self._actual_update_count)
 
     def _connect(self):
+        # TopBar e LeftPanel (Abertura e Refresh)
         self.topbar.btn_open.clicked.connect(self.select_folder)
         self.left.btn_open.clicked.connect(self.select_folder)
         self.left.btn_refresh.clicked.connect(self.refresh_project)
         self.topbar.btn_generate.clicked.connect(self.generate_markdown)
 
+        # LeftPanel (Árvore de Arquivos)
         self.left.btn_all.clicked.connect(lambda: self._set_all(True))
         self.left.btn_none.clicked.connect(lambda: self._set_all(False))
         self.left.tree.itemClicked.connect(self._on_item_click)
         self.left.tree.itemChanged.connect(lambda item, col: self.count_timer.start(200))
 
+        # CenterPanel (Ações do Markdown)
         self.center.btn_show_md.clicked.connect(self._restore_md_view)
         self.center.btn_copy.clicked.connect(self._copy_clipboard)
         self.center.btn_export.clicked.connect(self._export)
 
+        # RightPanel (Presets)
         self.right.btn_load.clicked.connect(self._load_preset)
         self.right.btn_save.clicked.connect(self._save_preset)
         self.right.btn_delete.clicked.connect(self._delete_preset)
+        
+        # RightPanel (Liga/Desliga dos Filtros)
+        self.right.chk_use_ignore.clicked.connect(self.refresh_project)
+        self.right.chk_use_gitignore.clicked.connect(self.refresh_project)
 
     def select_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Selecione a pasta do projeto")
@@ -743,23 +801,30 @@ class CodeGrimoireApp(QMainWindow):
 
         files_to_process = []
         self._collect_files(self.root_item, files_to_process)
-
         only_tree = self.right.chk_only_tree.isChecked()
 
         if not files_to_process and not only_tree:
-            QMessageBox.warning(self, "Aviso", "Nenhum arquivo selecionado para inclusão de conteúdo.")
+            QMessageBox.warning(self, "Aviso", "Nenhum arquivo selecionado.")
             return
+
+        # 👇 VERIFICA O MODO ESCOLHIDO 👇
+        format_mode = "simple"
+        if self.right.radio_detailed.isChecked(): format_mode = "detailed"
+        elif self.right.radio_toc.isChecked(): format_mode = "toc"
+        elif self.right.radio_optimized.isChecked(): format_mode = "optimized"
 
         self.topbar.btn_generate.setEnabled(False)
         self.status.set_busy("Gerando...")
         self.logs.log("Iniciando geração...", "info")
 
         config = {
+            "format_mode":  format_mode, # Passa o formato para o Worker
             "only_tree":    only_tree,
             "include_tree": self.right.chk_folders.isChecked(),
             "tree_scope":   self.right.btn_tree_scope.text(),
             "include_toc":  self.right.radio_toc.isChecked(),
             "rm_comments":  self.right.chk_rm_comments.isChecked(),
+            "minify":       self.right.chk_minify.isChecked(), 
             "is_split":     self.right.chk_split.isChecked(),
             "limit_lines":  self.right.spin_lines.value() if self.right.chk_split.isChecked() else float('inf'),
             "nome_projeto": os.path.basename(self.current_folder) or self.current_folder,
@@ -877,9 +942,27 @@ class CodeGrimoireApp(QMainWindow):
         self.left.tree.setUpdatesEnabled(False)
         self.left.tree.clear()
 
-        # Lê os filtros de ignorar
-        raw_ignores = self.right.field_ignore.text().split(',')
-        self._IGNORE = {item.strip() for item in raw_ignores if item.strip()}
+        self._ignore_patterns = []
+        
+        # --- 1. Lógica do Filtro Manual ---
+        if self.right.chk_use_ignore.isChecked():
+            raw_ignores = self.right.field_ignore.text().split(',')
+            self._ignore_patterns.extend([item.strip() for item in raw_ignores if item.strip()])
+            
+        # --- 2. Lógica do .gitignore ---
+        if self.right.chk_use_gitignore.isChecked():
+            gitignore_path = os.path.join(folder, '.gitignore')
+            if os.path.exists(gitignore_path):
+                try:
+                    with open(gitignore_path, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and not line.startswith('#'):
+                                clean_line = line.strip('/')
+                                self._ignore_patterns.append(clean_line)
+                    self.logs.log("Regras do .gitignore aplicadas.", "info")
+                except Exception as e:
+                    self.logs.log(f"Aviso: Falha ao ler .gitignore: {e}", "warning")
 
         nome = os.path.basename(folder) or folder
         self.root_item = QTreeWidgetItem(self.left.tree, [f"🗁 {nome}"])
@@ -903,10 +986,12 @@ class CodeGrimoireApp(QMainWindow):
         except PermissionError:
             return
 
+        # --- NOVO: Aplica o filtro unificado tanto em pastas quanto em arquivos ---
         dirs  = sorted(e for e in entries
-                       if os.path.isdir(os.path.join(path, e)) and e not in self._IGNORE)
+                       if os.path.isdir(os.path.join(path, e)) and not self._should_ignore(e))
         files = sorted(e for e in entries
-                       if os.path.isfile(os.path.join(path, e)))
+                       if os.path.isfile(os.path.join(path, e)) and not self._should_ignore(e))
+        # -------------------------------------------------------------------------
 
         for d in dirs:
             full = os.path.normpath(os.path.join(path, d))
@@ -914,17 +999,12 @@ class CodeGrimoireApp(QMainWindow):
             item.setData(0, Qt.UserRole, full)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsAutoTristate)
             
-            # --- SUBSTITUIÇÃO AQUI ---
             if favorites is not None:
-                # Se o caminho desta pasta está no backup, marca. Se não, deixa desmarcada.
                 state = Qt.Checked if full in favorites else Qt.Unchecked
             else:
-                # Se não tem backup (abertura inicial), marca tudo por padrão
                 state = Qt.Checked
                 
             item.setCheckState(0, state)
-            # --------------------------
-
             self._add_items(item, full, favorites)
 
         for fname in files:
@@ -933,7 +1013,6 @@ class CodeGrimoireApp(QMainWindow):
             item.setData(0, Qt.UserRole, full)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             
-            # Checa se este arquivo específico estava no backup (favorites)
             if favorites is not None:
                 state = Qt.Checked if full in favorites else Qt.Unchecked
             else:
