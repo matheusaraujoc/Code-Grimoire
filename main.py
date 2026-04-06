@@ -8,6 +8,15 @@ import os
 import json
 import re
 
+if sys.platform == 'win32':
+    import ctypes
+    try:
+        myappid = 'projeto.codegrimoire'
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+    except Exception as e:
+        # Se falhar, o programa continua rodando normalmente, apenas sem o ID especial
+        print(f"Aviso: Não foi possível definir o AppID do Windows: {e}")
+
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QPushButton, QLabel, QLineEdit, QFileDialog,
@@ -17,11 +26,10 @@ from PySide6.QtWidgets import (
     QGridLayout, QMenu, QStackedWidget
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QFont, QColor, QIcon
 
 from theme import MAIN_QSS, PLACEHOLDER_HTML
 from widgets import StatCard, StatusWidget, LogsPanel, MarkdownHighlighter
-
 
 # ─────────────────────────────────────────────
 #  WORKER THREAD — Geração em background
@@ -435,12 +443,12 @@ class RightPanel(QWidget):
         lay.addWidget(QLabel("Escopo da Estrutura:"))
         
         # Botão + QMenu substituindo QComboBox
-        self.btn_tree_scope = QPushButton("Apenas Selecionados")
+        self.btn_tree_scope = QPushButton("  Apenas Selecionados")
         self.btn_tree_scope.setObjectName("btn_dropdown")
         self.menu_tree_scope = QMenu(self)
         self.btn_tree_scope.setMenu(self.menu_tree_scope)
         
-        for scope in ["Apenas Selecionados", "Projeto Completo", "Apenas Pastas"]:
+        for scope in ["  Apenas Selecionados", "  Projeto Completo", "  Apenas Pastas"]:
             act = self.menu_tree_scope.addAction(scope)
             act.triggered.connect(lambda checked=False, text=scope: self.btn_tree_scope.setText(text))
             
@@ -488,6 +496,9 @@ class RightPanel(QWidget):
         self.spin_lines = QSpinBox()
         self.spin_lines.setRange(500, 50000)
         self.spin_lines.setValue(3000)
+        self.spin_lines.setButtonSymbols(QSpinBox.NoButtons)
+        self.spin_lines.wheelEvent = lambda event: event.ignore()
+        self.spin_lines.setAlignment(Qt.AlignCenter)
         spin_row.addWidget(QLabel("Tamanho aprox:"))
         spin_row.addWidget(self.spin_lines)
         lay.addWidget(self.chk_split)
@@ -564,7 +575,17 @@ class RightPanel(QWidget):
 class CodeGrimoireApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("CodeGrimoire — Transforme código em conhecimento")
+        self.setWindowTitle("CodeGrimoire")
+        # --- CONFIGURAÇÃO DO ÍCONE (CAMINHO ABSOLUTO) ---
+        # Pega a pasta onde o main.py está e entra na pasta 'icon'
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        icon_path = os.path.join(base_dir, 'icon', 'icon.png')
+        
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+        else:
+            print(f"Aviso: Ícone não encontrado em {icon_path}")
+        # -----------------------------------------------
         self.resize(1280, 820)
         self.setMinimumSize(900, 600)
 
@@ -623,7 +644,7 @@ class CodeGrimoireApp(QMainWindow):
         self.left.btn_all.clicked.connect(lambda: self._set_all(True))
         self.left.btn_none.clicked.connect(lambda: self._set_all(False))
         self.left.tree.itemClicked.connect(self._on_item_click)
-        self.left.tree.itemChanged.connect(lambda item, col: self.count_timer.start(50))
+        self.left.tree.itemChanged.connect(lambda item, col: self.count_timer.start(200))
 
         self.center.btn_show_md.clicked.connect(self._restore_md_view)
         self.center.btn_copy.clicked.connect(self._copy_clipboard)
@@ -661,14 +682,21 @@ class CodeGrimoireApp(QMainWindow):
         self.status.set_busy("Atualizando arquivos...")
         self.logs.log("Atualizando estrutura do projeto...", "info")
 
-        # 1. Fazer "backup" da seleção atual
-        saved_files = []
-        if self.root_item:
-            self._collect_files(self.root_item, saved_files)
-        
-        favorites = {os.path.normpath(f) for f in saved_files}
+        # 1. NOVO BACKUP: Salva o caminho de TUDO que estiver marcado (Arquivos e Pastas Vazias)
+        favorites = set()
+        def backup_tree(item):
+            if item.checkState(0) == Qt.Checked:
+                path = item.data(0, Qt.UserRole)
+                if path:
+                    favorites.add(os.path.normpath(path))
+            # Continua descendo para os filhos
+            for i in range(item.childCount()):
+                backup_tree(item.child(i))
 
-        # 2. Recriar a árvore JÁ com os favoritos injetados (super rápido)
+        if self.root_item:
+            backup_tree(self.root_item)
+
+        # 2. Recriar a árvore injetando o backup
         self._populate_tree(self.current_folder, favorites)
 
         self.logs.log("Projeto atualizado com sucesso.", "success")
@@ -687,13 +715,27 @@ class CodeGrimoireApp(QMainWindow):
                 self.center.btn_show_md.setEnabled(True)
 
     def _actual_update_count(self):
-        if self.root_item:
-            files = []
-            self._collect_files(self.root_item, files)
-            n = len(files)
-            self.left.lbl_count.setText(
-                f"{n} arquivo{'s' if n != 1 else ''} selecionado{'s' if n != 1 else ''}"
-            )
+        """Versão otimizada: conta arquivos sem acessar o disco rígido."""
+        if not self.root_item:
+            return
+
+        count = 0
+        def quick_count(item):
+            nonlocal count
+            # Se não tem filhos, é um arquivo (pela lógica da nossa árvore)
+            if item.childCount() == 0:
+                if item.checkState(0) == Qt.Checked:
+                    count += 1
+            else:
+                # Se tem filhos, percorre eles
+                for i in range(item.childCount()):
+                    quick_count(item.child(i))
+
+        quick_count(self.root_item)
+        
+        self.left.lbl_count.setText(
+            f"{count} arquivo{'s' if count != 1 else ''} selecionado{'s' if count != 1 else ''}"
+        )
 
     def generate_markdown(self):
         if not self.current_folder:
@@ -840,7 +882,7 @@ class CodeGrimoireApp(QMainWindow):
         self._IGNORE = {item.strip() for item in raw_ignores if item.strip()}
 
         nome = os.path.basename(folder) or folder
-        self.root_item = QTreeWidgetItem(self.left.tree, [f"📁 {nome}"])
+        self.root_item = QTreeWidgetItem(self.left.tree, [f"🗁 {nome}"])
         self.root_item.setData(0, Qt.UserRole, os.path.normpath(folder))
         self.root_item.setFlags(
             self.root_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsAutoTristate
@@ -849,6 +891,7 @@ class CodeGrimoireApp(QMainWindow):
         self.root_item.setCheckState(0, Qt.Checked if favorites is None else Qt.Unchecked)
 
         self._add_items(self.root_item, folder, favorites)
+        self._recalculate_folder_states(self.root_item)
         self.root_item.setExpanded(True)
 
         self.left.tree.setUpdatesEnabled(True)
@@ -871,8 +914,17 @@ class CodeGrimoireApp(QMainWindow):
             item.setData(0, Qt.UserRole, full)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsAutoTristate)
             
-            # Se tem favoritos, inicia desmarcado
-            item.setCheckState(0, Qt.Checked if favorites is None else Qt.Unchecked)
+            # --- SUBSTITUIÇÃO AQUI ---
+            if favorites is not None:
+                # Se o caminho desta pasta está no backup, marca. Se não, deixa desmarcada.
+                state = Qt.Checked if full in favorites else Qt.Unchecked
+            else:
+                # Se não tem backup (abertura inicial), marca tudo por padrão
+                state = Qt.Checked
+                
+            item.setCheckState(0, state)
+            # --------------------------
+
             self._add_items(item, full, favorites)
 
         for fname in files:
@@ -910,17 +962,17 @@ class CodeGrimoireApp(QMainWindow):
                     visited.add(real)
                     out.append(path)
 
-    def _build_tree_text(self, item, prefix="", scope="Apenas Selecionados") -> str:
+    def _build_tree_text(self, item, prefix="", scope="  Apenas Selecionados") -> str:
         result = ""
         valid_children = []
         for i in range(item.childCount()):
             child = item.child(i)
             caminho = child.data(0, Qt.UserRole)
             is_dir  = os.path.isdir(caminho)
-            if scope == "Apenas Selecionados":
+            if scope == "  Apenas Selecionados":
                 if child.checkState(0) != Qt.Unchecked:
                     valid_children.append(child)
-            elif scope == "Apenas Pastas":
+            elif scope == "  Apenas Pastas":
                 if is_dir:
                     valid_children.append(child)
             else:
@@ -1005,7 +1057,7 @@ class CodeGrimoireApp(QMainWindow):
             
             self.root_item.setCheckState(0, Qt.Unchecked)
             self._apply_preset(self.root_item, abs_files)
-            
+            self._recalculate_folder_states(self.root_item)
             self.left.tree.setUpdatesEnabled(True)
             self._actual_update_count()
             
@@ -1027,6 +1079,47 @@ class CodeGrimoireApp(QMainWindow):
             item.setCheckState(0, state)
         for i in range(item.childCount()):
             self._apply_preset(item.child(i), favorites)
+    
+
+    def _recalculate_folder_states(self, item):
+        """
+        Recalcula o estado de check (Checked, Unchecked, PartiallyChecked)
+        de uma pasta com base no estado atual dos seus filhos, de baixo para cima.
+        """
+        # Se for um arquivo (sem filhos), não faz nada
+        if item.childCount() == 0:
+            return
+
+        checked_count = 0
+        partially_checked_count = 0
+
+        # Primeiro, recalcula todos os filhos (recursão de baixo para cima)
+        for i in range(item.childCount()):
+            child = item.child(i)
+            self._recalculate_folder_states(child)
+            
+            state = child.checkState(0)
+            if state == Qt.Checked:
+                checked_count += 1
+            elif state == Qt.PartiallyChecked:
+                partially_checked_count += 1
+
+        # Agora define o estado da pasta atual
+        total_children = item.childCount()
+        
+        # Desliga temporariamente o AutoTristate para forçar o estado manual
+        flags = item.flags()
+        item.setFlags(flags & ~Qt.ItemIsAutoTristate)
+
+        if checked_count == total_children and total_children > 0:
+            item.setCheckState(0, Qt.Checked)
+        elif checked_count > 0 or partially_checked_count > 0:
+            item.setCheckState(0, Qt.PartiallyChecked)
+        else:
+            item.setCheckState(0, Qt.Unchecked)
+            
+        # Religa o AutoTristate para o usuário poder interagir normalmente
+        item.setFlags(flags | Qt.ItemIsAutoTristate)
 
 
 if __name__ == "__main__":

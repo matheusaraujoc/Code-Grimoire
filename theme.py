@@ -217,9 +217,9 @@ QTreeWidget#file_tree::item:selected {{
 }}
 
 QTreeWidget#file_tree::indicator {{
-    width: 14px;
-    height: 14px;
-    border-radius: 3px;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
     border: 2px solid #2e2e4e;
     background: #13131f;
 }}
@@ -440,9 +440,9 @@ QCheckBox:hover {{ color: #c8cdd8; }}
 QCheckBox:checked {{ color: #a78bfa; }}
 
 QCheckBox::indicator {{
-    width: 14px;
-    height: 14px;
-    border-radius: 3px;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
     border: 2px solid #2e2e4e;
     background: #13131f;
 }}
@@ -531,7 +531,7 @@ QLabel#lbl_stat_label {{
    LOGS
    ============================================= */
 QFrame#logs_panel {{
-    background: #0a0a14;
+    background: #14141e;
     border-top: 1px solid #2e2e4e; /* Linha de separação nítida */
     border-bottom: none;
     border-left: none;
