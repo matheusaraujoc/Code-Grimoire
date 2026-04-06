@@ -824,16 +824,28 @@ class CodeGrimoireApp(QMainWindow):
         self.count_timer.start(200)
 
     def select_folder(self, checked=False, folder_path=None):
-        # Proteção contra o "checked" do PySide6
         if not isinstance(folder_path, str): 
-            folder = QFileDialog.getExistingDirectory(self, "Selecione a pasta do projeto")
+            # Em vez do CLSID (que falhou no VS Code), usamos o Desktop ou a Home do Usuário.
+            # Isso é muito mais seguro e evita que o nome estranho apareça no campo de texto.
+            
+            # Opção A: Abre na Pasta do Usuário (C:\Users\Voce) - Muito comum em apps profissionais
+            inicio = os.path.expanduser("~")
+            
+            # Opção B: Se preferir abrir no Desktop (que mostra o 'Este Computador' no topo)
+            # inicio = os.path.join(os.path.expanduser("~"), "Desktop")
+            
+            folder = QFileDialog.getExistingDirectory(
+                self, 
+                "Selecione a pasta do projeto", 
+                inicio
+            )
             if not folder:
                 return
         else:
             folder = folder_path
 
         self.current_folder = folder
-        self._add_to_history(folder) # 👇 Salva no histórico automaticamente
+        self._add_to_history(folder)
         
         self._md_parts = []
         self._current_part_idx = 0
