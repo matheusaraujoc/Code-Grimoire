@@ -12,10 +12,10 @@ from PySide6.QtWidgets import (
     QSplitter, QPushButton, QLabel, QLineEdit, QFileDialog,
     QTreeWidget, QTreeWidgetItem, QMessageBox, QInputDialog,
     QTextBrowser, QFrame, QRadioButton, QButtonGroup,
-    QCheckBox, QComboBox, QScrollArea, QSizePolicy, QSpinBox, QGridLayout
+    QCheckBox, QComboBox, QScrollArea, QSizePolicy, QSpinBox, QGridLayout, QMenu
 )
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QColor
 
 from theme import MAIN_QSS, PLACEHOLDER_HTML
 from widgets import StatCard, StatusWidget, LogsPanel, MarkdownHighlighter
@@ -100,6 +100,7 @@ class LeftPanel(QWidget):
         self.tree.setHeaderHidden(True)
         self.tree.setIndentation(16)
         self.tree.setAnimated(True)
+        self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         col.addWidget(self.tree, 1)
 
         footer = QHBoxLayout()
@@ -221,7 +222,6 @@ class RightPanel(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
 
         content = QWidget()
         content.setObjectName("right_content")
@@ -233,9 +233,11 @@ class RightPanel(QWidget):
         lbl_title.setObjectName("lbl_section")
         col.addWidget(lbl_title)
 
+        # Chamada das seções de configuração
         self._build_format_group(col)
+        self._build_structure_group(col)  # <-- ESTA É A NOVA SEÇÃO
         self._build_include_group(col)
-        self._build_split_group(col) # NOVO GRUPO: Divisão
+        self._build_split_group(col)
         self._build_filters_group(col)
         self._build_optimizations_group(col)
         self._build_presets_group(col)
@@ -256,10 +258,28 @@ class RightPanel(QWidget):
         layout.addWidget(lbl)
         return group, layout
 
-    def _divider(self):
-        d = QFrame()
-        d.setObjectName("h_divider")
-        return d
+    # --- NOVA FUNÇÃO QUE CRIA OS WIDGETS QUE ESTAVAM FALTANDO ---
+    def _build_structure_group(self, parent):
+        group, lay = self._make_group("Configurações da Árvore")
+        
+        lay.addWidget(QLabel("Escopo da Estrutura:"))
+        self.combo_tree_scope = QComboBox()
+        self.combo_tree_scope.setObjectName("config_input")
+        self.combo_tree_scope.addItems([
+            "Apenas Selecionados", 
+            "Projeto Completo", 
+            "Apenas Pastas"
+        ])
+        lay.addWidget(self.combo_tree_scope)
+
+        self.chk_only_tree = QCheckBox("Gerar apenas estrutura (Sem código)")
+        self.chk_only_tree.setObjectName("chk_config")
+        lay.addWidget(self.chk_only_tree)
+        
+        parent.addWidget(group)
+
+    # ... Mantenha as outras funções (_build_format_group, _build_include_group, etc.) como estavam ...
+    # Mas certifique-se de manter o método update_stats e os StatCards abaixo:
 
     def _build_format_group(self, parent):
         group, lay = self._make_group("Formato de Saída")
@@ -289,65 +309,30 @@ class RightPanel(QWidget):
             lay.addWidget(w)
         parent.addWidget(group)
 
-    # NOVO: Grupo para configurar divisão inteligente
     def _build_split_group(self, parent):
         group, lay = self._make_group("Limites da IA (Divisão)")
         self.chk_split = QCheckBox("Dividir Markdown em partes")
-        self.chk_split.setChecked(False)
-        
         spin_row = QHBoxLayout()
-        lbl_limit = QLabel("Tamanho aprox:")
-        lbl_limit.setStyleSheet("color:#7070a0; font-size:11px;")
-        
         self.spin_lines = QSpinBox()
-        self.spin_lines.setObjectName("config_input")
         self.spin_lines.setRange(500, 50000)
         self.spin_lines.setValue(3000)
-        self.spin_lines.setSingleStep(500)
-        self.spin_lines.setSuffix(" linhas")
-        
-        spin_row.addWidget(lbl_limit)
+        spin_row.addWidget(QLabel("Tamanho aprox:"))
         spin_row.addWidget(self.spin_lines)
-        
         lay.addWidget(self.chk_split)
         lay.addLayout(spin_row)
         parent.addWidget(group)
 
     def _build_filters_group(self, parent):
         group, lay = self._make_group("Filtros")
-        lbl_ignore = QLabel("Ignorar arquivos")
-        lbl_ignore.setObjectName("lbl_radio_hint")
-        lbl_ignore.setStyleSheet("color:#5050a0; background:transparent; padding-left:0; font-size:11px;")
-        lay.addWidget(lbl_ignore)
         self.field_ignore = QLineEdit("node_modules, .git, dist")
-        self.field_ignore.setObjectName("config_input")
+        lay.addWidget(QLabel("Ignorar arquivos:"))
         lay.addWidget(self.field_ignore)
-        lay.addWidget(self._divider())
-        toggle_row = QHBoxLayout()
-        lbl_git = QLabel("Respeitar .gitignore")
-        lbl_git.setStyleSheet("color:#7070a0; background:transparent; font-size:12px;")
-        self._gitignore_on = True
-        self.toggle_gitignore = QPushButton()
-        self.toggle_gitignore.setObjectName("toggle_on")
-        self.toggle_gitignore.clicked.connect(self._toggle_gitignore)
-        toggle_row.addWidget(lbl_git)
-        toggle_row.addStretch()
-        toggle_row.addWidget(self.toggle_gitignore)
-        lay.addLayout(toggle_row)
         parent.addWidget(group)
-
-    def _toggle_gitignore(self):
-        self._gitignore_on = not self._gitignore_on
-        self.toggle_gitignore.setObjectName("toggle_on" if self._gitignore_on else "toggle_off")
-        self.toggle_gitignore.style().unpolish(self.toggle_gitignore)
-        self.toggle_gitignore.style().polish(self.toggle_gitignore)
 
     def _build_optimizations_group(self, parent):
         group, lay = self._make_group("Otimizações")
         self.chk_rm_comments = QCheckBox("Remover comentários")
-        self.chk_rm_comments.setChecked(True)
         self.chk_minify = QCheckBox("Minificar espaços")
-        self.chk_minify.setChecked(True)
         lay.addWidget(self.chk_rm_comments)
         lay.addWidget(self.chk_minify)
         parent.addWidget(group)
@@ -358,8 +343,8 @@ class RightPanel(QWidget):
         self.combo_presets.setEnabled(False)
         lay.addWidget(self.combo_presets)
         btns = QHBoxLayout()
-        self.btn_load   = QPushButton("Carregar")
-        self.btn_save   = QPushButton("Salvar")
+        self.btn_load = QPushButton("Carregar")
+        self.btn_save = QPushButton("Salvar")
         self.btn_delete = QPushButton("Excluir")
         for b in (self.btn_load, self.btn_save, self.btn_delete):
             b.setObjectName("btn_secondary")
@@ -367,25 +352,19 @@ class RightPanel(QWidget):
         lay.addLayout(btns)
         parent.addWidget(group)
 
-    # MODIFICADO: Grid 2x2 para acomodar o Card de Linhas
     def _build_stats(self, parent):
         lbl = QLabel("ESTATÍSTICAS")
         lbl.setObjectName("lbl_section")
         parent.addWidget(lbl)
-        
         grid = QGridLayout()
-        grid.setSpacing(6)
-        
-        self.card_files = StatCard("0",   "Arquivos")
-        self.card_langs = StatCard("0",   "Linguagens")
+        self.card_files = StatCard("0", "Arquivos")
+        self.card_langs = StatCard("0", "Linguagens")
         self.card_size  = StatCard("0 B", "Tamanho")
-        self.card_lines = StatCard("0",   "Linhas") # NOVO CARD
-        
+        self.card_lines = StatCard("0", "Linhas")
         grid.addWidget(self.card_files, 0, 0)
         grid.addWidget(self.card_langs, 0, 1)
         grid.addWidget(self.card_size, 1, 0)
         grid.addWidget(self.card_lines, 1, 1)
-        
         parent.addLayout(grid)
 
     def update_stats(self, n_files: int, n_langs: int, size_bytes: int, total_lines: int):
@@ -525,111 +504,138 @@ class CodeGrimoireApp(QMainWindow):
     # GERAÇÃO INTELIGENTE (DIVISÃO EM PARTES)
     # ==========================================
     def generate_markdown(self):
-        if not self.current_folder: return
-        files = []
-        self._collect_files(self.root_item, files)
-        if not files:
-            QMessageBox.warning(self, "Aviso", "Nenhum arquivo selecionado.")
+        """
+        Gera o conteúdo Markdown final baseado nas seleções da árvore e 
+        nas configurações de escopo e otimização.
+        """
+        if not self.current_folder:
             return
 
-        self.status.set_busy("Gerando...")
-        self.logs.log(f"Processando {len(files)} arquivo(s)...", "info")
-        nome = os.path.basename(self.current_folder)
-
-        # Contagem e Flags
-        exts = {}
+        # 1. Coleta de arquivos para o CONTEÚDO (baseado no que está marcado)
+        files_to_process = []
+        self._collect_files(self.root_item, files_to_process)
+        
+        # Flags e Configurações da UI
+        only_tree    = self.right.chk_only_tree.isChecked()
         include_tree = self.right.chk_folders.isChecked()
+        tree_scope   = self.right.combo_tree_scope.currentText() # "Apenas Selecionados", "Projeto Completo", "Apenas Pastas"
         include_toc  = self.right.radio_toc.isChecked()
         rm_comments  = self.right.chk_rm_comments.isChecked()
         is_split     = self.right.chk_split.isChecked()
         limit_lines  = self.right.spin_lines.value() if is_split else float('inf')
+        
+        # Validação inicial
+        if not files_to_process and not only_tree:
+            QMessageBox.warning(self, "Aviso", "Nenhum arquivo selecionado para inclusão de conteúdo.")
+            return
 
-        # Cabeçalho base do projeto
-        base_header = f"# {nome}\n\n"
+        self.status.set_busy("Gerando...")
+        self.logs.log(f"Iniciando geração (Modo: {'Apenas Estrutura' if only_tree else 'Completo'})...", "info")
+        
+        nome_projeto = os.path.basename(self.current_folder) or self.current_folder
+        
+        # 2. CONSTRUÇÃO DO CABEÇALHO (Header + Estrutura + TOC)
+        header_content = f"# {nome_projeto}\n\n"
+        
         if include_tree:
-            base_header += "## Estrutura do Projeto\n\n```\n"
-            base_header += f"{nome}/\n"
-            base_header += self._build_tree_text(self.root_item)
-            base_header += "```\n\n"
-        if include_toc:
-            base_header += "## Sumário\n\n"
-            for fp in files:
+            header_content += "## Estrutura do Projeto\n\n```\n"
+            header_content += f"{nome_projeto}/\n"
+            # Chama a função recursiva com o escopo selecionado
+            header_content += self._build_tree_text(self.root_item, scope=tree_scope)
+            header_content += "```\n\n"
+
+        if include_toc and not only_tree:
+            header_content += "## Sumário de Arquivos\n\n"
+            for fp in files_to_process:
                 rel = os.path.relpath(fp, self.current_folder).replace(os.sep, '/')
-                base_header += f"- {rel}\n"
-            base_header += "\n"
+                header_content += f"- {rel}\n"
+            header_content += "\n"
 
-        base_header += "## Arquivos\n\n"
+        header_content += "## Conteúdo dos Arquivos\n\n" if not only_tree else ""
 
-        # Variáveis de Acúmulo
+        # 3. PROCESSAMENTO DE CONTEÚDO E DIVISÃO EM PARTES
         self._md_parts = []
-        current_md = base_header
+        current_md = header_content
         current_lines = current_md.count('\n')
         
-        total_size = 0
-        total_lines_all = 0
+        total_size_bytes = 0
+        total_lines_all = current_lines
+        exts_found = {}
 
-        # Iteração arquivo por arquivo
-        for fp in files:
-            rel  = os.path.relpath(fp, self.current_folder).replace(os.sep, '/')
-            _, e = os.path.splitext(fp)
-            lang = e.lstrip('.')
-            if lang: exts[lang] = exts.get(lang, 0) + 1
-            
-            try:
-                with open(fp, 'r', encoding='utf-8') as f:
-                    code = f.read()
-                if rm_comments: code = self._strip_comments(code, lang)
+        if not only_tree:
+            for fp in files_to_process:
+                rel = os.path.relpath(fp, self.current_folder).replace(os.sep, '/')
+                _, ext = os.path.splitext(fp)
+                lang = ext.lstrip('.')
+                if lang:
+                    exts_found[lang] = exts_found.get(lang, 0) + 1
                 
-                file_md = f"### `{rel}`\n\n```{lang}\n{code}\n```\n\n---\n\n"
+                try:
+                    with open(fp, 'r', encoding='utf-8') as f:
+                        code = f.read()
+                    
+                    if rm_comments:
+                        code = self._strip_comments(code, lang)
+                    
+                    file_snippet = f"### `{rel}`\n\n```{lang}\n{code}\n```\n\n---\n\n"
+                    
+                except (UnicodeDecodeError, PermissionError):
+                    file_snippet = f"### `{rel}`\n\n*[Arquivo binário ou sem permissão de leitura — ignorado]*\n\n---\n\n"
+                except Exception as e:
+                    file_snippet = f"### `{rel}`\n\n*[Erro ao ler arquivo: {str(e)}]*\n\n---\n\n"
+
+                snippet_lines = file_snippet.count('\n')
                 
-            except (UnicodeDecodeError, PermissionError):
-                file_md = f"### `{rel}`\n\n*[Arquivo binário — ignorado]*\n\n---\n\n"
+                # Lógica de Divisão (Split)
+                # Se adicionar este arquivo estourar o limite E já tivermos conteúdo além do header
+                if is_split and (current_lines + snippet_lines) > limit_lines and current_lines > header_content.count('\n'):
+                    self._md_parts.append(current_md)
+                    # Nova parte começa com identificação
+                    current_md = f"# {nome_projeto} (Parte {len(self._md_parts) + 1})\n\n"
+                    current_lines = current_md.count('\n')
 
-            file_lines = file_md.count('\n')
-            total_size += len(file_md.encode('utf-8'))
+                current_md += file_snippet
+                current_lines += snippet_lines
+                total_lines_all += snippet_lines
+                total_size_bytes += len(file_snippet.encode('utf-8'))
 
-            # Se o arquivo vai estourar o limite e a parte atual não está vazia (header only não conta)
-            if is_split and (current_lines + file_lines) > limit_lines and current_lines > base_header.count('\n'):
-                # Empacota a parte anterior
-                self._md_parts.append(current_md)
-                # Começa uma nova parte
-                current_md = f"# {nome} (Parte {len(self._md_parts) + 1})\n\n"
-                current_lines = current_md.count('\n')
-
-            current_md += file_md
-            current_lines += file_lines
-            total_lines_all += file_lines
-
-        # Salva o resto que sobrou
+        # Adiciona a última (ou única) parte
         if current_md:
             self._md_parts.append(current_md)
 
-        # Atualiza a UI com os Resultados
-        langs = list(exts.keys())
-        self.right.update_stats(len(files), len(langs), total_size, total_lines_all)
-        
-        self.logs.log(f"Markdown gerado: {total_lines_all} linhas totais, dividido em {len(self._md_parts)} parte(s).", "success")
+        # 4. ATUALIZAÇÃO DA INTERFACE E ESTATÍSTICAS
+        n_langs = len(exts_found.keys())
+        # Se for apenas árvore, o tamanho é apenas do header
+        if only_tree:
+            total_size_bytes = len(header_content.encode('utf-8'))
+            total_lines_all = header_content.count('\n')
 
-        # Atualiza o ComboBox de Partes
+        self.right.update_stats(
+            len(files_to_process), 
+            n_langs, 
+            total_size_bytes, 
+            total_lines_all
+        )
+        
+        # Configura o Seletor de Partes (ComboBox)
         self.center.combo_parts.blockSignals(True)
         self.center.combo_parts.clear()
         
-        for i, part_md in enumerate(self._md_parts):
-            linhas_desta_parte = part_md.count('\n')
-            # Ex: "Parte 1 (2540 linhas) 📦"
-            icone = "📦 " if len(self._md_parts) > 1 else ""
-            self.center.combo_parts.addItem(f"{icone}Parte {i+1} ({linhas_desta_parte} linhas)")
+        for i, part_text in enumerate(self._md_parts):
+            p_lines = part_text.count('\n')
+            label = f"Parte {i+1} ({p_lines} linhas)"
+            if len(self._md_parts) > 1:
+                label = "📦 " + label
+            self.center.combo_parts.addItem(label)
             
         self.center.combo_parts.blockSignals(False)
+        self.center.combo_parts.setVisible(len(self._md_parts) > 1)
 
-        # Mostra os controles na interface
-        if len(self._md_parts) > 1:
-            self.center.combo_parts.setVisible(True)
-        else:
-            self.center.combo_parts.setVisible(False)
-
-        # Exibe a Primeira Parte na tela
+        # Exibe o resultado no Preview
         self._restore_md_view()
+        
+        msg_sucesso = f"Gerado com sucesso! {len(self._md_parts)} parte(s), {total_lines_all} linhas totais."
+        self.logs.log(msg_sucesso, "success")
         self.status.set_ready()
 
     def _restore_md_view(self):
@@ -767,22 +773,30 @@ class CodeGrimoireApp(QMainWindow):
             return '\n'.join(l for l in code.splitlines() if not l.strip().startswith('//'))
         return code
 
-    def _build_tree_text(self, item, prefix="") -> str:
-        """Constrói a árvore de texto baseada APENAS no que está selecionado na interface"""
+    def _build_tree_text(self, item, prefix="", scope="Apenas Selecionados") -> str:
+        """Constrói a árvore de texto baseada no escopo escolhido pelo usuário"""
         result = ""
         valid_children = []
         
-        # Filtra apenas os itens que estão marcados ou parcialmente marcados
+        # Filtra os filhos baseado no escopo escolhido
         for i in range(item.childCount()):
             child = item.child(i)
-            if child.checkState(0) != Qt.Unchecked:
+            caminho_real = child.data(0, Qt.UserRole)
+            is_dir = os.path.isdir(caminho_real)
+            
+            if scope == "Apenas Selecionados":
+                if child.checkState(0) != Qt.Unchecked:
+                    valid_children.append(child)
+            elif scope == "Apenas Pastas":
+                if is_dir:
+                    valid_children.append(child)
+            else: # "Projeto Completo"
                 valid_children.append(child)
                 
         for i, child in enumerate(valid_children):
             caminho_real = child.data(0, Qt.UserRole)
             clean_name = os.path.basename(caminho_real)
             
-            # MELHORIA VISUAL: Adiciona "/" no final se for uma pasta
             if os.path.isdir(caminho_real):
                 clean_name += "/"
             
@@ -790,10 +804,9 @@ class CodeGrimoireApp(QMainWindow):
             con  = "└── " if is_last else "├── "
             result += f"{prefix}{con}{clean_name}\n"
             
-            # Se for pasta e tiver filhos, desce na recursão
             if child.childCount() > 0:
                 ext = "    " if is_last else "│   "
-                result += self._build_tree_text(child, prefix + ext)
+                result += self._build_tree_text(child, prefix + ext, scope)
                 
         return result
 
