@@ -44,9 +44,10 @@ O CodeGrimoire resolve isso atuando como uma ponte de **Retrieval-Augmented Gene
 ### Opção 1: Executável para Windows (Recomendado)
 Se você usa Windows, não é necessário instalar o Python ou configurar nada.
 1. Acesse a aba de **[Releases](https://github.com/matheusaraujoc/Code-Grimoire/releases)** aqui no GitHub.
-2. Baixe o executável mais recente (ex: `CodeGrimoire_v1.0.exe` ou o arquivo `.zip`).
+2. Baixe o executável mais recente (ex: `CodeGrimoire.exe` ou o arquivo `.zip`).
 3. Dê um duplo clique no arquivo baixado e comece a usar!
-Obs: Se 
+
+> ⚠️ **Aviso do Windows (SmartScreen):** Como este é um projeto independente e o executável não possui um certificado digital pago, o Windows Defender pode exibir uma tela azul informando que "O Windows protegeu o seu computador" na primeira execução. Isso é um falso-positivo comum. Para abrir o programa, basta clicar em **Mais informações** e depois em **Executar assim mesmo**.
 
 ### Opção 2: A partir do código-fonte (Desenvolvedores / Linux / macOS)
 Se preferir rodar via código ou se estiver em outro sistema operacional, siga os passos abaixo:
