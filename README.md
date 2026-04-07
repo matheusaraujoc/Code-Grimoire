@@ -1,6 +1,6 @@
 # CodeGrimoire
 
-**O seu preparador de contexto RAG e analisador estrutural de sistemas para Inteligência Artificial.**
+**Preparador de contexto RAG e analisador estrutural de sistemas para Inteligência Artificial.**
 
 O CodeGrimoire é uma ferramenta open-source desenvolvida para resolver o problema da **fragmentação de contexto** ao interagir com Modelos de Linguagem de Larga Escala (LLMs). Ele transforma o código disperso de um repositório em um Grafo de Conhecimento Estruturado, otimizando o entendimento da IA sobre a arquitetura do seu software.
 
