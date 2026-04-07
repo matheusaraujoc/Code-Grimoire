@@ -31,6 +31,7 @@ from PySide6.QtGui import QFont, QColor, QIcon
 
 from theme import MAIN_QSS, PLACEHOLDER_HTML
 from widgets import StatCard, StatusWidget, LogsPanel, MarkdownHighlighter
+from analyzer import classify_file, extract_internal_imports_ast
 
 # ─────────────────────────────────────────────
 #  WORKER THREAD — Geração em background
@@ -84,13 +85,70 @@ class GeneratorWorker(QThread):
             if include_tree:
                 header_content += "## Estrutura do Projeto\n\n```\n"
                 header_content += f"{nome_projeto}/\n{tree_text}```\n\n"
-            if include_toc and not only_tree:
+
+
+        if cfg.get("use_heuristics") or cfg.get("use_ast"):
+            if is_opt:
+                header_content += "<structural_analysis>\n"
+            else:
+                header_content += "## Análise Estrutural do Sistema\n\n"
+
+            for fp in files:
+                rel_path = os.path.relpath(fp, base).replace(os.sep, '/')
+                
+                if is_opt:
+                    file_info = f"<file path=\"{rel_path}\">\n"
+                else:
+                    file_info = f"### `{rel_path}`\n"
+                
+                # 1. Classificação Heurística
+                if cfg.get("use_heuristics"):
+                    from analyzer import classify_file  # Import seguro inline caso necessário
+                    papel = classify_file(fp)
+                    if is_opt:
+                        file_info += f"  <role>{papel}</role>\n"
+                    else:
+                        file_info += f"- **Papel principal:** {papel}\n"
+                
+                # 2. Extração de Dependências (AST) - Foco em Python
+                if cfg.get("use_ast") and fp.endswith('.py'):
+                    from analyzer import extract_internal_imports_ast
+                    deps = extract_internal_imports_ast(fp, files)
+                    if deps:
+                        if is_opt:
+                            file_info += f"  <depends_on>{','.join(deps)}</depends_on>\n"
+                        else:
+                            file_info += f"- **Depende de:** `{', '.join(deps)}`\n"
+                    else:
+                        if is_opt:
+                            file_info += f"  <depends_on>none</depends_on>\n"
+                        else:
+                            file_info += f"- **Depende de:** Nenhuma dependência interna direta detectada.\n"
+                
+                if is_opt:
+                    file_info += "</file>\n"
+                else:
+                    file_info += "\n"
+
+                header_content += file_info
+                
+            if is_opt:
+                header_content += "</structural_analysis>\n"
+            else:
+                header_content += "---\n\n"
+
+
+        if include_toc and not only_tree:
+            # No modo otimizado, evitamos TOC se já temos o RAG para poupar tokens
+            if not is_opt:
                 header_content += "## Sumário de Arquivos\n\n"
                 for fp in files:
                     rel = os.path.relpath(fp, base).replace(os.sep, '/')
                     header_content += f"- {rel}\n"
                 header_content += "\n"
-            if not only_tree:
+                
+        if not only_tree:
+            if not is_opt:
                 header_content += "## Conteúdo dos Arquivos\n\n"
 
         md_parts      = []
@@ -516,6 +574,9 @@ class CenterPanel(QWidget):
 # ─────────────────────────────────────────────
 #  PAINEL DIREITO — Configurações
 # ─────────────────────────────────────────────
+# ─────────────────────────────────────────────
+#  PAINEL DIREITO — Configurações
+# ─────────────────────────────────────────────
 class RightPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -546,6 +607,10 @@ class RightPanel(QWidget):
         self._build_split_group(col)
         self._build_filters_group(col)
         self._build_optimizations_group(col)
+        
+        # 👇 NOVO: Grupo de Inteligência de Contexto adicionado aqui 👇
+        self._build_ai_context_group(col) 
+        
         self._build_presets_group(col)
 
         col.addStretch()
@@ -568,7 +633,6 @@ class RightPanel(QWidget):
         group, lay = self._make_group("Configurações da Árvore")
         lay.addWidget(QLabel("Escopo da Estrutura:"))
         
-        # Botão + QMenu substituindo QComboBox
         self.btn_tree_scope = QPushButton("  Apenas Selecionados")
         self.btn_tree_scope.setObjectName("btn_dropdown")
         self.menu_tree_scope = QMenu(self)
@@ -596,7 +660,6 @@ class RightPanel(QWidget):
         self.radio_simple.setChecked(True)
         self._fmt_group = QButtonGroup()
         
-        # Atualize o loop para incluir a nova variável
         for r in (self.radio_simple, self.radio_detailed, self.radio_toc, self.radio_optimized):
             self._fmt_group.addButton(r)
             
@@ -640,7 +703,6 @@ class RightPanel(QWidget):
     def _build_filters_group(self, parent):
         group, lay = self._make_group("Filtros")
         
-        # 1. Filtro Manual (Campo de Texto)
         self.chk_use_ignore = QCheckBox("Aplicar filtros manuais")
         self.chk_use_ignore.setChecked(True)
         lay.addWidget(self.chk_use_ignore)
@@ -648,7 +710,6 @@ class RightPanel(QWidget):
         self.field_ignore = QLineEdit("node_modules, .git, dist, __pycache__")
         lay.addWidget(self.field_ignore)
         
-        # 2. Filtro Automático (.gitignore)
         self.chk_use_gitignore = QCheckBox("Aplicar .gitignore do projeto")
         self.chk_use_gitignore.setChecked(True)
         lay.addWidget(self.chk_use_gitignore)
@@ -663,10 +724,24 @@ class RightPanel(QWidget):
         lay.addWidget(self.chk_minify)
         parent.addWidget(group)
 
+    def _build_ai_context_group(self, parent):
+        group, lay = self._make_group("Inteligência de Contexto (RAG)")
+        
+        self.chk_heuristics = QCheckBox("Classificar Papel dos Arquivos")
+        self.chk_heuristics.setToolTip("Tenta identificar Entrypoints, Services, Utils, etc.")
+        self.chk_heuristics.setChecked(True)
+        
+        self.chk_ast = QCheckBox("Mapear Dependências (Python)")
+        self.chk_ast.setToolTip("Lê o código Python para criar um mapa de imports internos.")
+        self.chk_ast.setChecked(True)
+
+        lay.addWidget(self.chk_heuristics)
+        lay.addWidget(self.chk_ast)
+        parent.addWidget(group)
+
     def _build_presets_group(self, parent):
         group, lay = self._make_group("Presets de Seleção")
         
-        # Botão + QMenu substituindo QComboBox
         self.btn_presets = QPushButton("Nenhum preset")
         self.btn_presets.setObjectName("btn_dropdown")
         self.menu_presets = QMenu(self)
@@ -710,7 +785,6 @@ class RightPanel(QWidget):
         else:
             s = f"{size_bytes/1024**2:.1f} MB"
         self.card_size.set_value(s)
-
 
 # ─────────────────────────────────────────────
 #  JANELA PRINCIPAL
@@ -1018,6 +1092,8 @@ class CodeGrimoireApp(QMainWindow):
             "limit_lines":  self.right.spin_lines.value() if self.right.chk_split.isChecked() else float('inf'),
             "nome_projeto": os.path.basename(self.current_folder) or self.current_folder,
             "tree_text":    self._build_tree_text(self.root_item, scope=self.right.btn_tree_scope.text()),
+            "use_heuristics": self.right.chk_heuristics.isChecked(),
+            "use_ast": self.right.chk_ast.isChecked(),
             "base_folder":  self.current_folder,
         }
 
